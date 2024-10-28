@@ -67,20 +67,20 @@ func (s *RelayServer) Start() {
 
 		mux.HandleFunc("/join/", logRequest(func(w http.ResponseWriter, r *http.Request) {
 			parts := strings.Split(r.URL.Path, "/")
-			if len(parts) != 3 {
-				http.Error(w, "Invalid session ID", http.StatusBadRequest)
+			if len(parts) != 3 || parts[2] == "" {
+				http.Error(w, "Invalid session ID format", http.StatusBadRequest)
 				return
 			}
 
 			sessionID := parts[2]
 			session, exists := s.sessions.Load(sessionID)
 			if !exists {
-				http.Error(w, "Session not found", http.StatusNotFound)
+				http.Error(w, fmt.Sprintf("Session '%s' not found", sessionID), http.StatusNotFound)
 				return
 			}
 
 			if session.(*TransferSession).ReceiverID != "" {
-				http.Error(w, "Session already has a receiver", http.StatusConflict)
+				http.Error(w, "This session already has an active receiver", http.StatusConflict)
 				return
 			}
 

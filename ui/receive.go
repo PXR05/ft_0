@@ -20,6 +20,7 @@ type ReceiveModel struct {
 	cancelChan    chan struct{}
 	progress      progress.Model
 	width         int
+	height        int
 }
 
 type TransferStatus struct {
@@ -32,10 +33,11 @@ type TransferStatus struct {
 type transferMsg server.ReceiveProgress
 
 var (
-	conn      *net.Conn
-	metadata  server.FileMetadata
-	selected  string
-	confirmed string
+	conn       *net.Conn
+	metadata   server.FileMetadata
+	selected   string
+	confirmed  string
+	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(Err)).Bold(true)
 )
 
 func resetState() {
@@ -75,6 +77,8 @@ func (m ReceiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
 		m.progress.Width = msg.Width - 20
 		return m, nil
 
@@ -84,25 +88,56 @@ func (m ReceiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.transferState.Error = msg.Error
 		m.transferState.State = msg.State
 
-		return m, listenForTransferProgress(m.progressChan)
+		if msg.State != server.StateCompleted && msg.State != server.StateError && msg.State != server.StateCancelled {
+			return m, listenForTransferProgress(m.progressChan)
+		}
+		return m, nil
 
 	case tea.KeyMsg:
-		if m.transferState.State == server.StateCompleted || m.transferState.State == server.StateCancelled || m.transferState.State == server.StateError {
-			err := server.LeaveSession(m.sessionId)
-			if err != nil {
-				m.err = err
+		if msg.Type == tea.KeyCtrlC {
+			if conn != nil {
+				(*conn).Close()
 			}
 			resetState()
 			return m, tea.Quit
 		}
-		if msg.Type == tea.KeyCtrlC {
-			if m.transferState.State == server.StateReceiving {
-				close(m.cancelChan)
+
+		if m.err != nil {
+			resetState()
+			return m, tea.Quit
+		}
+
+		if m.transferState.State == server.StateCompleted || m.transferState.State == server.StateCancelled || m.transferState.State == server.StateError {
+			err := server.LeaveSession(m.sessionId)
+			if err != nil {
+				m.err = err
 				return m, nil
 			}
 			resetState()
 			return m, tea.Quit
 		}
+
+		if msg.Type == tea.KeyEnter {
+			if m.sessionId == "" {
+				m.sessionId = m.sessionInput.Value()
+				if m.sessionId != "" {
+					cn, err := server.StartReceiver(m.sessionId)
+					if err != nil {
+						m.err = err
+						return m, nil
+					}
+					conn = &cn
+					meta, err := server.ReceiveMetadata(cn)
+					if err != nil {
+						m.err = err
+						return m, nil
+					}
+					metadata = meta
+				}
+				return m, nil
+			}
+		}
+
 		if m.transferState.State == server.StateCancelled {
 			resetState()
 			return m, tea.Quit
@@ -136,7 +171,7 @@ func (m ReceiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func createView(m ReceiveModel) string {
+func createView(m *ReceiveModel) string {
 	textHighlight := lipgloss.NewStyle().Foreground(lipgloss.Color(Accent))
 	metaString := fmt.Sprintf(
 		("Filename : %s\n" +
@@ -170,9 +205,9 @@ func createView(m ReceiveModel) string {
 		if metadata == (server.FileMetadata{}) || conn == nil {
 			cn, err := server.StartReceiver(m.sessionId)
 			if err != nil {
-				return fmt.Sprintf("Error: %v", err)
+				m.err = err
+				return errorStyle.Render(fmt.Sprintf("Error: %v", err)) + "\n\nPress any key to continue"
 			}
-
 			conn = &cn
 			if metadata == (server.FileMetadata{}) {
 				meta, err := server.ReceiveMetadata(cn)
@@ -200,14 +235,14 @@ func createView(m ReceiveModel) string {
 	}
 	inputStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(Accent))
 	return fmt.Sprintf(
-		"Input sender session token\n\n%s\n",
+		"Input sender's Session ID\n\n%s\n",
 		inputStyle.Render(m.sessionInput.View()),
 	)
 }
 
 func (m ReceiveModel) View() string {
 	m.sessionInput.Focus()
-	return AppFrame(Container.Render(createView(m)), "ctrl + c: quit")
+	return AppFrame(Container.Render(createView(&m)), "ctrl + c: quit", m.width, m.height)
 }
 
 func CreateSessionInput() textinput.Model {

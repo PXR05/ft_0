@@ -22,41 +22,55 @@ type ReceiveProgress struct {
 }
 
 func LeaveSession(sessionID string) error {
+	if sessionID == "" {
+		return nil
+	}
+
 	resp, err := http.Get(RELAY_PROTOCOL + "://" + RELAY_SERVER + "/leave/" + sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to leave session: %v", err.Error())
+		return fmt.Errorf("couldn't disconnect cleanly (%v)", err.Error())
 	}
 	defer resp.Body.Close()
 	return nil
 }
 
 func StartReceiver(sessionID string) (net.Conn, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("please enter a valid session ID")
+	}
+
 	resp, err := http.Get(RELAY_PROTOCOL + "://" + RELAY_SERVER + "/join/" + sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to join session: %v", err.Error())
+		return nil, fmt.Errorf("couldn't connect to relay server - is it running? (%v)", err.Error())
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("session ID not found")
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to join session: server returned %d", resp.StatusCode)
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return nil, fmt.Errorf("session '%s' not found - check the ID and try again", sessionID)
+	case http.StatusConflict:
+		return nil, fmt.Errorf("session already has a receiver")
+	case http.StatusOK:
+	default:
+		return nil, fmt.Errorf("unexpected error (status %d) - please try again", resp.StatusCode)
 	}
 
 	var session TransferSession
 	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
-		return nil, fmt.Errorf("invalid session data: %v", err)
+		return nil, fmt.Errorf("invalid session data - please try again")
 	}
 
-	conn, err := net.Dial("tcp", "localhost:"+TRANSFER_PORT)
+	conn, err := net.DialTimeout("tcp", "localhost:"+TRANSFER_PORT, 5*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to transfer server: %v", err.Error())
+		return nil, fmt.Errorf("couldn't connect to sender - are they still online? (%v)", err.Error())
 	}
+
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
 	return conn, nil
 }
 
 func ReceiveMetadata(conn net.Conn) (FileMetadata, error) {
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
 	reader := bufio.NewReader(conn)
 
 	_, err := conn.Write([]byte("ready\n"))

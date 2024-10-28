@@ -28,6 +28,8 @@ type SendModel struct {
 	totalBytes    int64
 	progressChan  chan server.SendProgress
 	cancel        context.CancelFunc
+	width         int
+	height        int
 }
 
 func InitialSendModel() SendModel {
@@ -55,6 +57,8 @@ func listenForSenderProgress(sub chan server.SendProgress) tea.Cmd {
 func (m SendModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
 		m.progress.Width = msg.Width - 20
 		return m, nil
 
@@ -81,7 +85,10 @@ func (m SendModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bytesSent = msg.BytesSent
 		m.totalBytes = msg.TotalBytes
 
-		return m, listenForSenderProgress(m.progressChan)
+		if msg.State != server.StateCompleted && msg.State != server.StateError && msg.State != server.StateCancelled {
+			return m, listenForSenderProgress(m.progressChan)
+		}
+		return m, nil
 	}
 
 	if m.selectedFile != "" && m.progressChan == nil {
@@ -117,6 +124,7 @@ func (m SendModel) View() string {
 		s.WriteString("Pick a file")
 		s.WriteString("\n\n" + m.filepicker.View())
 	} else {
+		s.Reset()
 		s.WriteString(emphasis.Render(m.selectedFile))
 		s.WriteString("\n\n")
 		help = "q: quit"
@@ -146,12 +154,13 @@ func (m SendModel) View() string {
 		}
 	}
 
-	return AppFrame(Container.Render(s.String()), help)
+	return AppFrame(Container.Render(s.String()), help, m.width, m.height)
 }
 
 func CreateFilepicker() filepicker.Model {
 	fp := filepicker.New()
 	fp.CurrentDirectory, _ = os.UserHomeDir()
+	fp.AutoHeight = true
 	fp.Styles = filepicker.Styles{
 		Cursor:         lipgloss.NewStyle().Foreground(lipgloss.Color(Accent)),
 		Symlink:        lipgloss.NewStyle().Foreground(lipgloss.Color("#5fffaf")),

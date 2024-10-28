@@ -7,7 +7,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/nsf/termbox-go"
 )
 
 type Model struct {
@@ -15,12 +14,15 @@ type Model struct {
 	Receive ReceiveModel
 	Send    SendModel
 	Relay   RelayModel
+	width   int
+	height  int
 }
 
 const (
 	Accent = "#ffffaf"
 	Muted  = "#4d4d4d"
 	Normal = "#dddddd"
+	Err    = "#ff5f5f"
 )
 
 var (
@@ -37,6 +39,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+
 	case server.RelayLogMsg:
 		if m.Mode.Choice == "Relay" {
 			m.Relay, cmd = m.Relay.Update(msg)
@@ -65,11 +72,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	return m, cmd
 }
-
-var (
-	W int
-	H int
-)
 
 func (m *Model) View() string {
 	var s strings.Builder
@@ -106,18 +108,10 @@ func (m *Model) View() string {
 		help = "ctrl + c: quit"
 	}
 
-	return AppFrame(s.String(), help)
+	return AppFrame(s.String(), help, m.width, m.height)
 }
 
-func AppFrame(content string, helpText string) string {
-	if W == 0 || H == 0 {
-		if err := termbox.Init(); err != nil {
-			panic(err)
-		}
-		W, H = termbox.Size()
-		termbox.Close()
-	}
-
+func AppFrame(content string, helpText string, w, h int) string {
 	titleStyle := lipgloss.NewStyle().
 		Padding(0, 1).
 		Margin(1, 2).
@@ -125,7 +119,13 @@ func AppFrame(content string, helpText string) string {
 		Background(lipgloss.Color(Accent))
 	title := titleStyle.Render("FT_0")
 
-	frame := lipgloss.NewStyle().Padding(1, 0).Width(W).Height(H - 5)
+	contentHeight := h - lipgloss.Height(title) - lipgloss.Height(helpText)
+
+	frame := lipgloss.NewStyle().
+		Padding(1, 0).
+		Width(w).
+		Height(contentHeight)
+
 	help := Container.Foreground(lipgloss.Color(Muted)).Render(helpText)
 
 	return title + frame.Render(content) + "\n" + help
