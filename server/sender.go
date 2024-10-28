@@ -1,4 +1,3 @@
-// server/sender.go
 package server
 
 import (
@@ -127,6 +126,24 @@ func sendFile(path string, conn net.Conn, progressChan chan<- SendProgress, ctx 
 		return
 	}
 
+	reader := bufio.NewReader(conn)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		progressChan <- SendProgress{
+			State: StateError,
+			Error: fmt.Errorf("error receiving ready signal: %v", err),
+		}
+		return
+	}
+
+	if strings.TrimSpace(response) != "ready" {
+		progressChan <- SendProgress{
+			State: StateError,
+			Error: fmt.Errorf("unexpected response from receiver: %s", response),
+		}
+		return
+	}
+
 	metadata := fmt.Sprintf("%s|%d\n", filepath.Base(path), fileInfo.Size())
 	_, err = conn.Write([]byte(metadata))
 	if err != nil {
@@ -137,8 +154,7 @@ func sendFile(path string, conn net.Conn, progressChan chan<- SendProgress, ctx 
 		return
 	}
 
-	reader := bufio.NewReader(conn)
-	response, err := reader.ReadString('\n')
+	response, err = reader.ReadString('\n')
 	if err != nil {
 		progressChan <- SendProgress{
 			State: StateError,
@@ -149,7 +165,7 @@ func sendFile(path string, conn net.Conn, progressChan chan<- SendProgress, ctx 
 
 	if strings.TrimSpace(response) != "accepted" {
 		progressChan <- SendProgress{
-			State: StateError,
+			State: StateCancelled,
 			Error: fmt.Errorf("transfer rejected by receiver"),
 		}
 		return

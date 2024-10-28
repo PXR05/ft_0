@@ -14,6 +14,13 @@ import (
 	"time"
 )
 
+type ReceiveProgress struct {
+	Speed         float64
+	BytesReceived int64
+	Error         error
+	State         TransferState
+}
+
 func LeaveSession(sessionID string) error {
 	resp, err := http.Get(RELAY_PROTOCOL + "://" + RELAY_SERVER + "/leave/" + sessionID)
 	if err != nil {
@@ -28,12 +35,18 @@ func StartReceiver(sessionID string) (net.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to join session: %v", err.Error())
 	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("session ID not found")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to join session: server returned %d", resp.StatusCode)
+	}
 
 	var session TransferSession
-	defer resp.Body.Close()
-	textBody := bufio.NewReader(resp.Body)
 	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
-		return nil, fmt.Errorf("failed to decode session: %v", textBody)
+		return nil, fmt.Errorf("invalid session data: %v", err)
 	}
 
 	conn, err := net.Dial("tcp", "localhost:"+TRANSFER_PORT)
@@ -45,6 +58,11 @@ func StartReceiver(sessionID string) (net.Conn, error) {
 
 func ReceiveMetadata(conn net.Conn) (FileMetadata, error) {
 	reader := bufio.NewReader(conn)
+
+	_, err := conn.Write([]byte("ready\n"))
+	if err != nil {
+		return FileMetadata{}, fmt.Errorf("failed to send ready signal: %v", err)
+	}
 
 	fileInfo, err := reader.ReadString('\n')
 	if err != nil {
@@ -69,19 +87,12 @@ func ReceiveMetadata(conn net.Conn) (FileMetadata, error) {
 	return metadata, nil
 }
 
-type TransferProgress struct {
-	Speed         float64
-	BytesReceived int64
-	Error         error
-	State         TransferState
-}
-
-func ReceiveFile(conn net.Conn, m FileMetadata, progressChan chan<- TransferProgress, cancelChan <-chan struct{}) {
+func ReceiveFile(conn net.Conn, m FileMetadata, progressChan chan<- ReceiveProgress, cancelChan <-chan struct{}) {
 	go func() {
 		defer close(progressChan)
 		defer conn.Close()
 
-		progressChan <- TransferProgress{State: StateInitializing}
+		progressChan <- ReceiveProgress{State: StateInitializing}
 
 		reader := bufio.NewReader(conn)
 		conn.Write([]byte("accepted\n"))
@@ -99,7 +110,7 @@ func ReceiveFile(conn net.Conn, m FileMetadata, progressChan chan<- TransferProg
 
 		file, err := os.Create(safeName)
 		if err != nil {
-			progressChan <- TransferProgress{
+			progressChan <- ReceiveProgress{
 				Error: fmt.Errorf("failed to create file: %v", err),
 				State: StateError,
 			}
@@ -111,14 +122,14 @@ func ReceiveFile(conn net.Conn, m FileMetadata, progressChan chan<- TransferProg
 		var receivedBytes int64
 		startTime := time.Now()
 
-		progressChan <- TransferProgress{State: StateReceiving}
+		progressChan <- ReceiveProgress{State: StateReceiving}
 
 		for {
 			select {
 			case <-cancelChan:
 				file.Close()
 				os.Remove(safeName)
-				progressChan <- TransferProgress{
+				progressChan <- ReceiveProgress{
 					Speed:         float64(receivedBytes) / time.Since(startTime).Seconds() / 1024 / 1024,
 					BytesReceived: receivedBytes,
 					State:         StateCancelled,
@@ -127,7 +138,7 @@ func ReceiveFile(conn net.Conn, m FileMetadata, progressChan chan<- TransferProg
 			default:
 				n, err := reader.Read(buffer)
 				if err == io.EOF {
-					progressChan <- TransferProgress{
+					progressChan <- ReceiveProgress{
 						Speed:         float64(receivedBytes) / time.Since(startTime).Seconds() / 1024 / 1024,
 						BytesReceived: receivedBytes,
 						State:         StateCompleted,
@@ -135,7 +146,7 @@ func ReceiveFile(conn net.Conn, m FileMetadata, progressChan chan<- TransferProg
 					return
 				}
 				if err != nil {
-					progressChan <- TransferProgress{
+					progressChan <- ReceiveProgress{
 						Error: fmt.Errorf("failed to read file: %v", err),
 						State: StateError,
 					}
@@ -146,7 +157,7 @@ func ReceiveFile(conn net.Conn, m FileMetadata, progressChan chan<- TransferProg
 				receivedBytes += int64(n)
 				speed := float64(receivedBytes) / time.Since(startTime).Seconds() / 1024 / 1024
 
-				progressChan <- TransferProgress{
+				progressChan <- ReceiveProgress{
 					Speed:         speed,
 					BytesReceived: receivedBytes,
 					State:         StateReceiving,

@@ -1,4 +1,3 @@
-// ui/sender.go
 package ui
 
 import (
@@ -60,7 +59,9 @@ func (m SendModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		if msg.Type == tea.KeyEnter && (m.transferState == server.StateCompleted || m.transferState == server.StateError) {
+		if msg.Type == tea.KeyEnter && (m.transferState == server.StateCompleted ||
+			m.transferState == server.StateError ||
+			m.transferState == server.StateCancelled) {
 			m.quitting = true
 			return m, tea.Quit
 		}

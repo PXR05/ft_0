@@ -16,7 +16,7 @@ type ReceiveModel struct {
 	sessionId     string
 	err           error
 	transferState TransferStatus
-	progressChan  chan server.TransferProgress
+	progressChan  chan server.ReceiveProgress
 	cancelChan    chan struct{}
 	progress      progress.Model
 	width         int
@@ -29,7 +29,7 @@ type TransferStatus struct {
 	Error    error
 }
 
-type transferMsg server.TransferProgress
+type transferMsg server.ReceiveProgress
 
 var (
 	conn      *net.Conn
@@ -60,7 +60,7 @@ func (m ReceiveModel) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-func listenForTransferProgress(sub chan server.TransferProgress) tea.Cmd {
+func listenForTransferProgress(sub chan server.ReceiveProgress) tea.Cmd {
 	return func() tea.Msg {
 		progress := <-sub
 		if progress.Error != nil {
@@ -111,11 +111,15 @@ func (m ReceiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Type == tea.KeyEnter {
 				if selected == "n" || selected == "N" {
 					confirmed = "n"
+					if conn != nil {
+						(*conn).Write([]byte("rejected\n"))
+						(*conn).Close()
+					}
 					m.transferState.State = server.StateCancelled
 					return m, nil
 				} else if selected == "y" || selected == "Y" || selected == "" {
 					confirmed = "y"
-					m.progressChan = make(chan server.TransferProgress)
+					m.progressChan = make(chan server.ReceiveProgress)
 					server.ReceiveFile(*conn, metadata, m.progressChan, m.cancelChan)
 					return m, listenForTransferProgress(m.progressChan)
 				}
