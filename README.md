@@ -69,9 +69,9 @@ FT_0/
   - [x] Switching between modes causes issues
   - [x] Error handling
 - Features:
-  - [ ] Multiple file transfers
-  - [ ] Custom relay servers
   - [ ] Encryption
   - [ ] Compression
+  - [ ] WebRTC connection
+  - [ ] Multiple file transfers
   - [ ] Resuming interrupted transfers
   - [ ] Custom themes
