@@ -79,10 +79,20 @@ func (m ReceiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.progress.Width = msg.Width - 20
+		m.progress.Width = m.width - 20
+		m.sessionInput.Width = m.width - 40
 		return m, nil
 
 	case transferMsg:
+		if msg.Error != nil {
+			if sessionErr, ok := msg.Error.(server.SessionError); ok {
+				m.err = fmt.Errorf("%s", sessionErr.Message)
+			} else {
+				m.err = msg.Error
+			}
+			m.transferState.State = server.StateError
+			return m, nil
+		}
 		m.transferState.Progress = float64(msg.BytesReceived) / float64(metadata.Size)
 		m.transferState.Speed = msg.Speed
 		m.transferState.Error = msg.Error
@@ -99,12 +109,16 @@ func (m ReceiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				(*conn).Close()
 			}
 			resetState()
-			return m, tea.Quit
+			return m, func() tea.Msg {
+				return ReturnToMenuMsg{}
+			}
 		}
 
 		if m.err != nil {
 			resetState()
-			return m, tea.Quit
+			return m, func() tea.Msg {
+				return ReturnToMenuMsg{}
+			}
 		}
 
 		if m.transferState.State == server.StateCompleted || m.transferState.State == server.StateCancelled || m.transferState.State == server.StateError {
@@ -114,7 +128,9 @@ func (m ReceiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			resetState()
-			return m, tea.Quit
+			return m, func() tea.Msg {
+				return ReturnToMenuMsg{}
+			}
 		}
 
 		if msg.Type == tea.KeyEnter {
@@ -140,7 +156,9 @@ func (m ReceiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.transferState.State == server.StateCancelled {
 			resetState()
-			return m, tea.Quit
+			return m, func() tea.Msg {
+				return ReturnToMenuMsg{}
+			}
 		}
 		if metadata != (server.FileMetadata{}) {
 			if msg.Type == tea.KeyEnter {

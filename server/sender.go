@@ -111,7 +111,7 @@ func sendFile(path string, conn net.Conn, progressChan chan<- SendProgress, ctx 
 	if err != nil {
 		progressChan <- SendProgress{
 			State: StateError,
-			Error: fmt.Errorf("failed to open file: %v", err),
+			Error: fmt.Errorf("failed to access file: %w", err),
 		}
 		return
 	}
@@ -125,6 +125,18 @@ func sendFile(path string, conn net.Conn, progressChan chan<- SendProgress, ctx 
 		}
 		return
 	}
+
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	defer conn.SetDeadline(time.Time{})
+
+	defer func() {
+		if r := recover(); r != nil {
+			progressChan <- SendProgress{
+				State: StateError,
+				Error: fmt.Errorf("unexpected error: %v", r),
+			}
+		}
+	}()
 
 	reader := bufio.NewReader(conn)
 	response, err := reader.ReadString('\n')
@@ -166,7 +178,7 @@ func sendFile(path string, conn net.Conn, progressChan chan<- SendProgress, ctx 
 	if strings.TrimSpace(response) != "accepted" {
 		progressChan <- SendProgress{
 			State: StateCancelled,
-			Error: fmt.Errorf("transfer rejected by receiver"),
+			Error: ErrTransferRejected,
 		}
 		return
 	}

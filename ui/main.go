@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"fmt"
-	"ft_0/server"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,6 +16,17 @@ type Model struct {
 	height  int
 }
 
+func InitialModel() Model {
+	return Model{
+		Mode:    InitialModeModel(),
+		Send:    InitialSendModel(),
+		Receive: InitialReceiveModel(),
+		Relay:   NewRelayModel(),
+	}
+}
+
+type ReturnToMenuMsg struct{}
+
 const (
 	Accent = "#ffffaf"
 	Muted  = "#4d4d4d"
@@ -26,7 +35,7 @@ const (
 )
 
 var (
-	Container = lipgloss.NewStyle().Padding(0, 2)
+	Container = lipgloss.NewStyle().Padding(1, 2)
 )
 
 var Error error
@@ -36,19 +45,10 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		return m, nil
-
-	case server.RelayLogMsg:
-		if m.Mode.Choice == "Relay" {
-			m.Relay, cmd = m.Relay.Update(msg)
-			return m, cmd
-		}
 
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
@@ -63,52 +63,95 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
-		if m.Mode.Choice == "Relay" {
-			m.Relay, cmd = m.Relay.Update(msg)
-			return m, cmd
+
+	case ReturnToMenuMsg:
+		switch m.Mode.Choice {
+		case "Send":
+			m.Send = InitialSendModel()
+		case "Receive":
+			m.Receive = InitialReceiveModel()
+		case "Relay":
+			m.Relay = NewRelayModel()
 		}
-		m.Mode, cmd = m.Mode.Update(msg)
+		m.Mode.Choice = ""
+		return m, nil
 	}
 
-	return m, cmd
+	var cmd tea.Cmd
+	switch m.Mode.Choice {
+	case "Send":
+		sendModel, cmd := m.Send.Update(msg)
+		var ok bool
+		m.Send, ok = sendModel.(SendModel)
+		if !ok {
+			panic("could not perform send model type assertion")
+		}
+		return m, cmd
+
+	case "Receive":
+		receiveModel, cmd := m.Receive.Update(msg)
+		var ok bool
+		m.Receive, ok = receiveModel.(ReceiveModel)
+		if !ok {
+			panic("could not perform receive model type assertion")
+		}
+		return m, cmd
+
+	case "Relay":
+		m.Relay, cmd = m.Relay.Update(msg)
+		return m, cmd
+
+	default:
+		m.Mode, cmd = m.Mode.Update(msg)
+		if m.Mode.Choice != "" {
+			switch m.Mode.Choice {
+			case "Send":
+				m.Send = InitialSendModel()
+				m.Send.width = m.width
+				m.Send.height = m.height
+				m.Send.filepicker.Height = m.height - 14
+				m.Send.progress.Width = m.width - 20
+				if cmd := m.Send.filepicker.Init(); cmd != nil {
+					return m, cmd
+				}
+
+			case "Receive":
+				m.Receive = InitialReceiveModel()
+				m.Receive.width = m.width
+				m.Receive.height = m.height
+				m.Receive.progress.Width = m.width - 20
+				m.Receive.sessionInput.Width = m.width - 20
+				if cmd := m.Receive.Init(); cmd != nil {
+					return m, cmd
+				}
+
+			case "Relay":
+				m.Relay = NewRelayModel()
+				if cmd := m.Relay.Init(); cmd != nil {
+					return m, cmd
+				}
+			}
+		}
+		return m, cmd
+	}
 }
 
-func (m *Model) View() string {
+func (m Model) View() string {
 	var s strings.Builder
 	if Error != nil {
 		s.WriteString(Error.Error())
 	}
-	if m.Mode.Choice != "" {
-		switch m.Mode.Choice {
-		case "Send":
-			mod := InitialSendModel()
-			prog := tea.NewProgram(&mod, tea.WithAltScreen())
-			if _, err := prog.Run(); err != nil {
-				fmt.Println("Error running program:", err)
-			}
-			prog.Kill()
-			m.Mode.Choice = ""
-		case "Receive":
-			mod := InitialReceiveModel()
-			prog := tea.NewProgram(&mod, tea.WithAltScreen())
-			if _, err := prog.Run(); err != nil {
-				fmt.Println("Error running program:", err)
-			}
-			prog.Kill()
-			m.Mode.Choice = ""
-		case "Relay":
-			s.WriteString(m.Relay.View())
-		}
-	} else {
-		s.WriteString(m.Mode.ModeList.View())
-	}
 
-	help := "j/↓: up • k/↑: down • q: quit"
-	if m.Mode.Choice == "Relay" {
-		help = "ctrl + c: quit"
+	switch m.Mode.Choice {
+	case "Send":
+		return m.Send.View()
+	case "Receive":
+		return m.Receive.View()
+	case "Relay":
+		return m.Relay.View()
+	default:
+		return AppFrame(m.Mode.View(), "j/↓: up • k/↑: down • q: quit", m.width, m.height)
 	}
-
-	return AppFrame(s.String(), help, m.width, m.height)
 }
 
 func AppFrame(content string, helpText string, w, h int) string {
@@ -119,14 +162,19 @@ func AppFrame(content string, helpText string, w, h int) string {
 		Background(lipgloss.Color(Accent))
 	title := titleStyle.Render("FT_0")
 
-	contentHeight := h - lipgloss.Height(title) - lipgloss.Height(helpText)
+	helpStyle := Container.Foreground(lipgloss.Color(Muted))
+	help := helpStyle.Render(helpText)
+
+	contentHeight := h - lipgloss.Height(title) - lipgloss.Height(help) - 2
 
 	frame := lipgloss.NewStyle().
-		Padding(1, 0).
 		Width(w).
 		Height(contentHeight)
 
-	help := Container.Foreground(lipgloss.Color(Muted)).Render(helpText)
-
-	return title + frame.Render(content) + "\n" + help
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		frame.Render(content),
+		help,
+	)
 }

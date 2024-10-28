@@ -59,26 +59,37 @@ func (m SendModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.progress.Width = msg.Width - 20
-		return m, nil
+		m.filepicker.Height = m.height - 6
+		m.progress.Width = m.width - 20
 
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyEnter && (m.transferState == server.StateCompleted ||
 			m.transferState == server.StateError ||
 			m.transferState == server.StateCancelled) {
-			m.quitting = true
-			return m, tea.Quit
+			return m, func() tea.Msg {
+				return ReturnToMenuMsg{}
+			}
 		}
 		if msg.Type == tea.KeyCtrlC || msg.String() == "q" {
 			if m.cancel != nil {
 				m.cancel()
 				m.transferState = server.StateCancelled
 			}
-			m.quitting = true
-			return m, tea.Quit
+			return m, func() tea.Msg {
+				return ReturnToMenuMsg{}
+			}
 		}
 
 	case senderMsg:
+		if msg.Error != nil {
+			if sessionErr, ok := msg.Error.(server.SessionError); ok {
+				m.err = fmt.Errorf("%s", sessionErr.Message)
+			} else {
+				m.err = msg.Error
+			}
+			m.transferState = server.StateError
+			return m, nil
+		}
 		m.transferState = msg.State
 		m.sessionID = msg.SessionID
 		m.speed = msg.Speed
@@ -159,8 +170,13 @@ func (m SendModel) View() string {
 
 func CreateFilepicker() filepicker.Model {
 	fp := filepicker.New()
-	fp.CurrentDirectory, _ = os.UserHomeDir()
-	fp.AutoHeight = true
+	fp.CurrentDirectory, _ = os.Getwd()
+	fp.AllowedTypes = []string{}
+	fp.ShowHidden = true
+	fp.ShowPermissions = true
+	fp.FileAllowed = true
+	fp.DirAllowed = false
+
 	fp.Styles = filepicker.Styles{
 		Cursor:         lipgloss.NewStyle().Foreground(lipgloss.Color(Accent)),
 		Symlink:        lipgloss.NewStyle().Foreground(lipgloss.Color("#5fffaf")),

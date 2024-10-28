@@ -36,23 +36,29 @@ func LeaveSession(sessionID string) error {
 
 func StartReceiver(sessionID string) (net.Conn, error) {
 	if sessionID == "" {
-		return nil, fmt.Errorf("please enter a valid session ID")
+		return nil, SessionError{
+			Code:    "INVALID_SESSION",
+			Message: "Please enter a valid session ID",
+		}
 	}
 
 	resp, err := http.Get(RELAY_PROTOCOL + "://" + RELAY_SERVER + "/join/" + sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't connect to relay server - is it running? (%v)", err.Error())
+		return nil, ErrRelayServerDown
 	}
 	defer resp.Body.Close()
 
 	switch resp.StatusCode {
 	case http.StatusNotFound:
-		return nil, fmt.Errorf("session '%s' not found - check the ID and try again", sessionID)
+		return nil, ErrSessionNotFound
 	case http.StatusConflict:
-		return nil, fmt.Errorf("session already has a receiver")
+		return nil, ErrSessionConflict
 	case http.StatusOK:
 	default:
-		return nil, fmt.Errorf("unexpected error (status %d) - please try again", resp.StatusCode)
+		return nil, SessionError{
+			Code:    "UNEXPECTED_ERROR",
+			Message: fmt.Sprintf("Unexpected error (status %d) - please try again", resp.StatusCode),
+		}
 	}
 
 	var session TransferSession
@@ -105,6 +111,18 @@ func ReceiveFile(conn net.Conn, m FileMetadata, progressChan chan<- ReceiveProgr
 	go func() {
 		defer close(progressChan)
 		defer conn.Close()
+
+		defer func() {
+			if r := recover(); r != nil {
+				progressChan <- ReceiveProgress{
+					Error: fmt.Errorf("unexpected error: %v", r),
+					State: StateError,
+				}
+			}
+		}()
+
+		conn.SetDeadline(time.Now().Add(30 * time.Second))
+		defer conn.SetDeadline(time.Time{})
 
 		progressChan <- ReceiveProgress{State: StateInitializing}
 

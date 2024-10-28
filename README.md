@@ -66,8 +66,8 @@ FT_0/
 
 - Fixes:
   - [x] Send mode restarts on rejection/error
-  - [ ] Switching between modes causes issues
-  - [ ] Error handling
+  - [x] Switching between modes causes issues
+  - [x] Error handling
 - Features:
   - [ ] Multiple file transfers
   - [ ] Custom relay servers

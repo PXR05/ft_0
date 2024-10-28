@@ -10,13 +10,9 @@ import (
 )
 
 func main() {
-	m := ui.Model{
-		Mode:    ui.InitialModeModel(),
-		Receive: ui.InitialReceiveModel(),
-		Send:    ui.InitialSendModel(),
-	}
-	prog := tea.NewProgram(&m, tea.WithAltScreen())
-	if _, err := prog.Run(); err != nil {
+	model := ui.InitialModel()
+	p := tea.NewProgram(&model, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
 		fmt.Println("Error running program:", err)
 		os.Exit(1)
 	}
