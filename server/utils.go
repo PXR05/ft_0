@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 )
 
-func generateID() string {
+func GenerateID() string {
 	bytes := make([]byte, 3)
 	rand.Read(bytes)
 	return hex.EncodeToString(bytes)

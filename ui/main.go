@@ -150,7 +150,7 @@ func (m Model) View() string {
 	case "Relay":
 		return m.Relay.View()
 	default:
-		return AppFrame(m.Mode.View(), "j/↓: up • k/↑: down • q: quit", m.width, m.height)
+		return m.Mode.View()
 	}
 }
 

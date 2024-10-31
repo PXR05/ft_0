@@ -1,6 +1,6 @@
 package server
 
-const (
+var (
 	CHUNK_SIZE     = 1024 * 32
 	RELAY_PROTOCOL = "http"
 	RELAY_SERVER   = "localhost:3000"

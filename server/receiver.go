@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -107,7 +108,7 @@ func ReceiveMetadata(conn net.Conn) (FileMetadata, error) {
 	return metadata, nil
 }
 
-func ReceiveFile(conn net.Conn, m FileMetadata, progressChan chan<- ReceiveProgress, cancelChan <-chan struct{}) {
+func ReceiveFile(conn net.Conn, m FileMetadata, progressChan chan<- ReceiveProgress, ctx context.Context) {
 	go func() {
 		defer close(progressChan)
 		defer conn.Close()
@@ -131,8 +132,7 @@ func ReceiveFile(conn net.Conn, m FileMetadata, progressChan chan<- ReceiveProgr
 
 		safeName := m.Name
 
-		existing, err := os.Open(safeName)
-		if existing != nil || !os.IsNotExist(err) {
+		if _, err := os.Stat(safeName); err == nil {
 			safeName = fmt.Sprintf("%s_%d%s",
 				strings.TrimSuffix(m.Name, filepath.Ext(m.Name)),
 				time.Now().Unix(),
@@ -143,7 +143,7 @@ func ReceiveFile(conn net.Conn, m FileMetadata, progressChan chan<- ReceiveProgr
 		file, err := os.Create(safeName)
 		if err != nil {
 			progressChan <- ReceiveProgress{
-				Error: fmt.Errorf("failed to create file: %v", err),
+				Error: fmt.Errorf("failed to create file '%s': %v", safeName, err),
 				State: StateError,
 			}
 			return
@@ -158,43 +158,54 @@ func ReceiveFile(conn net.Conn, m FileMetadata, progressChan chan<- ReceiveProgr
 
 		for {
 			select {
-			case <-cancelChan:
+			case <-ctx.Done():
 				file.Close()
 				os.Remove(safeName)
 				progressChan <- ReceiveProgress{
 					Speed:         float64(receivedBytes) / time.Since(startTime).Seconds() / 1024 / 1024,
 					BytesReceived: receivedBytes,
 					State:         StateCancelled,
+					Error:         fmt.Errorf("transfer cancelled"),
 				}
 				return
 			default:
-				n, err := reader.Read(buffer)
-				if err == io.EOF {
-					progressChan <- ReceiveProgress{
-						Speed:         float64(receivedBytes) / time.Since(startTime).Seconds() / 1024 / 1024,
-						BytesReceived: receivedBytes,
-						State:         StateCompleted,
-					}
-					return
-				}
-				if err != nil {
-					progressChan <- ReceiveProgress{
-						Error: fmt.Errorf("failed to read file: %v", err),
-						State: StateError,
-					}
-					return
-				}
-
-				file.Write(buffer[:n])
-				receivedBytes += int64(n)
-				speed := float64(receivedBytes) / time.Since(startTime).Seconds() / 1024 / 1024
-
-				progressChan <- ReceiveProgress{
-					Speed:         speed,
-					BytesReceived: receivedBytes,
-					State:         StateReceiving,
-				}
 			}
+
+			n, err := reader.Read(buffer)
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				progressChan <- ReceiveProgress{
+					Error: fmt.Errorf("failed to read from connection: %v", err),
+					State: StateError,
+				}
+				return
+			}
+
+			_, err = file.Write(buffer[:n])
+			if err != nil {
+				progressChan <- ReceiveProgress{
+					Error: fmt.Errorf("failed to write to file '%s': %v", safeName, err),
+					State: StateError,
+				}
+				return
+			}
+
+			receivedBytes += int64(n)
+			speed := float64(receivedBytes) / time.Since(startTime).Seconds() / 1024 / 1024
+
+			progressChan <- ReceiveProgress{
+				Speed:         speed,
+				BytesReceived: receivedBytes,
+				State:         StateReceiving,
+			}
+		}
+
+		progressChan <- ReceiveProgress{
+			Speed:         float64(receivedBytes) / time.Since(startTime).Seconds() / 1024 / 1024,
+			BytesReceived: receivedBytes,
+			State:         StateCompleted,
 		}
 	}()
 }

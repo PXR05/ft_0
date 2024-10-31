@@ -40,6 +40,8 @@ func (i ModeItem) FilterValue() string { return "" }
 type ModeModel struct {
 	ModeList list.Model
 	Choice   string
+	width    int
+	height   int
 }
 
 func InitialModeModel() ModeModel {
@@ -58,6 +60,8 @@ func (m ModeModel) Update(msg tea.Msg) (ModeModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.ModeList.SetWidth(msg.Width)
+		m.width = msg.Width
+		m.height = msg.Height
 		return m, nil
 
 	case tea.KeyMsg:
@@ -75,7 +79,7 @@ func (m ModeModel) Update(msg tea.Msg) (ModeModel, tea.Cmd) {
 }
 
 func (m ModeModel) View() string {
-	return "\n" + m.ModeList.View()
+	return AppFrame("\n"+m.ModeList.View(), "j/↓: up • k/↑: down • q: quit", m.width, m.height)
 }
 
 func CreateModeList() list.Model {

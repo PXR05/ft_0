@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"ft_0/server"
 	"net"
@@ -21,6 +22,7 @@ type ReceiveModel struct {
 	progress      progress.Model
 	width         int
 	height        int
+	cancelFunc    context.CancelFunc
 }
 
 type TransferStatus struct {
@@ -105,8 +107,8 @@ func (m ReceiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
-			if conn != nil {
-				(*conn).Close()
+			if m.cancelFunc != nil {
+				m.cancelFunc()
 			}
 			resetState()
 			return m, func() tea.Msg {
@@ -173,7 +175,9 @@ func (m ReceiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else if selected == "y" || selected == "Y" || selected == "" {
 					confirmed = "y"
 					m.progressChan = make(chan server.ReceiveProgress)
-					server.ReceiveFile(*conn, metadata, m.progressChan, m.cancelChan)
+					ctx, cancel := context.WithCancel(context.Background())
+					m.cancelFunc = cancel
+					server.ReceiveFile(*conn, metadata, m.progressChan, ctx)
 					return m, listenForTransferProgress(m.progressChan)
 				}
 			}

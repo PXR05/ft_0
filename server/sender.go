@@ -3,11 +3,9 @@ package server
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,91 +25,92 @@ func StartSender(filepath string, progressChan chan<- SendProgress, ctx context.
 	go func() {
 		defer close(progressChan)
 
-		progressChan <- SendProgress{State: StateInitializing}
-
-		select {
-		case <-ctx.Done():
+		if err := validateFile(filepath); err != nil {
 			progressChan <- SendProgress{
-				State: StateCancelled,
-				Error: fmt.Errorf("transfer cancelled"),
+				State: StateError,
+				Error: err,
 			}
 			return
-		default:
 		}
 
-		resp, err := http.Post(RELAY_PROTOCOL+"://"+RELAY_SERVER+"/new", "application/json", nil)
+		progressChan <- SendProgress{State: StateInitializing}
+
+		sm := NewSessionManager()
+		session, err := sm.CreateSession(ctx)
 		if err != nil {
 			progressChan <- SendProgress{
 				State: StateError,
-				Error: fmt.Errorf("failed to create session: %v", err),
+				Error: err,
 			}
 			return
 		}
-
-		var session TransferSession
-		if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
-			progressChan <- SendProgress{
-				State: StateError,
-				Error: fmt.Errorf("failed to decode session: %v", err),
-			}
-			return
-		}
-		resp.Body.Close()
 
 		progressChan <- SendProgress{
 			State:     StateWaitingForReceiver,
 			SessionID: session.SessionID,
 		}
 
-		listener, err := net.Listen("tcp", ":"+TRANSFER_PORT)
+		cm := NewConnectionManager()
+		conn, err := waitForReceiver(ctx, cm)
 		if err != nil {
 			progressChan <- SendProgress{
 				State: StateError,
-				Error: fmt.Errorf("failed to start listener: %v", err),
+				Error: err,
 			}
 			return
 		}
-		defer listener.Close()
 
-		connChan := make(chan net.Conn)
-		errChan := make(chan error)
-
-		go func() {
-			conn, err := listener.Accept()
-			if err != nil {
-				errChan <- err
-				return
-			}
-			connChan <- conn
-		}()
-
-		select {
-		case <-ctx.Done():
-			listener.Close()
-			progressChan <- SendProgress{
-				State: StateCancelled,
-				Error: fmt.Errorf("transfer cancelled"),
-			}
-			return
-		case err := <-errChan:
-			progressChan <- SendProgress{
-				State: StateError,
-				Error: fmt.Errorf("failed to accept connection: %v", err),
-			}
-			return
-		case conn := <-connChan:
-			defer conn.Close()
-			sendFile(filepath, conn, progressChan, ctx)
-		}
+		sendFile(filepath, conn, progressChan, ctx)
 	}()
 }
 
+func validateFile(filepath string) error {
+	if _, err := os.Stat(filepath); os.IsNotExist(err) {
+		return fmt.Errorf("failed to access file '%s': file does not exist", filepath)
+	}
+	return nil
+}
+
+func waitForReceiver(ctx context.Context, cm *ConnectionManager) (*Connection, error) {
+	listener, err := net.Listen("tcp", ":"+TRANSFER_PORT)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start listener: %v", err)
+	}
+	defer listener.Close()
+
+	connChan := make(chan net.Conn)
+	errChan := make(chan error)
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			errChan <- err
+			return
+		}
+		connChan <- conn
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("transfer cancelled")
+	case err := <-errChan:
+		return nil, fmt.Errorf("failed to accept connection: %v", err)
+	case conn := <-connChan:
+		return cm.NewConnection(conn), nil
+	}
+}
+
 func sendFile(path string, conn net.Conn, progressChan chan<- SendProgress, ctx context.Context) {
+	defer conn.Close()
+
+	_, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
 	file, err := os.Open(path)
 	if err != nil {
 		progressChan <- SendProgress{
 			State: StateError,
-			Error: fmt.Errorf("failed to access file: %w", err),
+			Error: fmt.Errorf("failed to access file '%s': %w", path, err),
 		}
 		return
 	}
@@ -121,7 +120,7 @@ func sendFile(path string, conn net.Conn, progressChan chan<- SendProgress, ctx 
 	if err != nil {
 		progressChan <- SendProgress{
 			State: StateError,
-			Error: fmt.Errorf("failed to get file info: %v", err),
+			Error: fmt.Errorf("failed to get file info for '%s': %v", path, err),
 		}
 		return
 	}
@@ -205,12 +204,7 @@ func sendFile(path string, conn net.Conn, progressChan chan<- SendProgress, ctx 
 
 		n, err := file.Read(buffer)
 		if err == io.EOF {
-			progressChan <- SendProgress{
-				State:     StateCompleted,
-				BytesSent: sentBytes,
-				Speed:     float64(sentBytes) / time.Since(startTime).Seconds() / 1024 / 1024,
-			}
-			return
+			break
 		}
 		if err != nil {
 			progressChan <- SendProgress{
@@ -224,7 +218,7 @@ func sendFile(path string, conn net.Conn, progressChan chan<- SendProgress, ctx 
 		if err != nil {
 			progressChan <- SendProgress{
 				State: StateError,
-				Error: fmt.Errorf("error sending file: %v", err),
+				Error: fmt.Errorf("error sending file data: %v", err),
 			}
 			return
 		}
@@ -238,5 +232,11 @@ func sendFile(path string, conn net.Conn, progressChan chan<- SendProgress, ctx 
 			BytesSent:  sentBytes,
 			TotalBytes: fileInfo.Size(),
 		}
+	}
+
+	progressChan <- SendProgress{
+		State:     StateCompleted,
+		BytesSent: sentBytes,
+		Speed:     float64(sentBytes) / time.Since(startTime).Seconds() / 1024 / 1024,
 	}
 }

@@ -55,8 +55,8 @@ func (s *RelayServer) Start() {
 		}
 
 		mux.HandleFunc("/new", logRequest(func(w http.ResponseWriter, r *http.Request) {
-			sessionID := generateID()
-			senderID := generateID()
+			sessionID := GenerateID()
+			senderID := GenerateID()
 			session := &TransferSession{
 				SessionID: sessionID,
 				SenderID:  senderID,
@@ -84,7 +84,7 @@ func (s *RelayServer) Start() {
 				return
 			}
 
-			session.(*TransferSession).ReceiverID = generateID()
+			session.(*TransferSession).ReceiverID = GenerateID()
 			json.NewEncoder(w).Encode(session)
 		}))
 

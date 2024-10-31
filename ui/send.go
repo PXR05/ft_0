@@ -105,7 +105,10 @@ func (m SendModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.selectedFile != "" && m.progressChan == nil {
 		progressChan := make(chan server.SendProgress)
 		m.progressChan = progressChan
-		server.StartSender(m.selectedFile, progressChan, context.Background())
+
+		ctx, cancel := context.WithCancel(context.Background())
+		m.cancel = cancel
+		server.StartSender(m.selectedFile, progressChan, ctx)
 		return m, listenForSenderProgress(progressChan)
 	}
 
