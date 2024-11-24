@@ -19,7 +19,7 @@ FT_0 is a modern, terminal-based file transfer application built in Go using the
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/yourusername/ft_0.git
+   git clone https://github.com/PXR05/ft_0.git
    cd ft_0
    ```
 
