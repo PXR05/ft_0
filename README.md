@@ -1,6 +1,6 @@
 # FT_0
 
-FT_0 is a modern, terminal-based file transfer application built in Go using the [Bubble Tea](https://github.com/charmbracelet/bubbletea) framework. It provides a seamless way to transfer files between computers through a beautiful terminal interface.
+FT_0 is a modern terminal-based file transfer application built in Go using the [Bubble Tea](https://github.com/charmbracelet/bubbletea) framework. It provides a seamless way to transfer files between computers through a terminal interface.
 
 ## Features ✨
 
